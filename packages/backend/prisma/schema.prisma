@@ -11,3 +11,65 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum PaymentMode {
+  UPI_AUTOPAY
+  NACH
+  EMANDATE
+}
+
+enum TxnStatus {
+  PENDING
+  RESOLVED_RECOVERED
+  RESOLVED_UNRECOVERABLE
+  ESCALATED
+  DEAD
+}
+
+enum AttemptResult {
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+model FailedTransaction {
+  id            String      @id @default(cuid())
+  txnId         String      @unique
+  customerId    String
+  merchantId    String
+  paymentMode   PaymentMode
+  amount        Decimal
+  failTimestamp DateTime
+  failCode      String
+  trueReason    String
+  isRecoverable Boolean?
+  status        TxnStatus   @default(PENDING)
+  createdAt     DateTime    @default(now())
+}
+
+model CustomerContext {
+  customerId           String     @id
+  debitPatternDays     Int[]
+  pastSuccessTxnDates  DateTime[]
+  contactCountThisWeek Int        @default(0)
+  mandateExpiryDate    DateTime
+}
+
+model RetryAttempt {
+  id               String        @id @default(cuid())
+  txnId            String
+  attemptNo        Int
+  attemptTimestamp DateTime
+  actionTaken      String
+  result           AttemptResult
+  feeCharged       Decimal
+}
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  txnId           String
+  timestamp       DateTime @default(now())
+  decisionType    String
+  reasonText      String
+  confidenceScore Float?
+}

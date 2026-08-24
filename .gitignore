@@ -1,0 +1,37 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# build output
+dist/
+build/
+.next/
+out/
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Prisma
+packages/backend/prisma/*.db
+
+# logs
+*.log
+npm-debug.log*
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/*
+!.vscode/settings.json
+.idea/
+
+# leftover AI-tool config (delete folders too, this just guards against re-add)
+.agents/
+.claude/
+.windsurf/

@@ -1,0 +1,25 @@
+{
+	"name": "recoup",
+	"version": "1.0.0",
+	"private": true,
+	"description": "AI-powered recovery engine for failed UPI Autopay/NACH payments — classifies failure root cause, executes smart retries, and tracks measured ₹ recovered with full audit trail. Built for Razorpay AI Buildathon 2026.",
+	"homepage": "https://github.com/SuprathikJoshua/Recoup#readme",
+	"bugs": {
+		"url": "https://github.com/SuprathikJoshua/Recoup/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/SuprathikJoshua/Recoup.git"
+	},
+	"author": "Suprathik Joshua",
+	"type": "module",
+	"workspaces": [
+		"packages/*"
+	],
+	"directories": {
+		"doc": "docs"
+	},
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	}
+}
