@@ -47,7 +47,7 @@ async function processTransaction(
   );
 
   // 4. Execute Decision & Record Outcome
-  await executeDecision(txn.txnId, decision, existingAttempts.length);
+  await executeDecision(txn.txnId, decision, existingAttempts.length, txn.customerId);
 }
 
 export async function runPipeline(): Promise<void> {

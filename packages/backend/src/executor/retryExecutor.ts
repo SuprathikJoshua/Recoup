@@ -35,12 +35,14 @@ export function simulateRazorpayRetry(): AttemptResult {
  * @param txnId Transaction identifier
  * @param decision Decider outcome including action, reason, and optional scheduled time
  * @param currentAttemptsCount Number of prior attempts executed for this transaction
+ * @param customerId Customer identifier for updating weekly contact caps
  * @returns The execution result with the updated status
  */
 export async function executeDecision(
   txnId: string,
   decision: DeciderOutput,
-  currentAttemptsCount: number
+  currentAttemptsCount: number,
+  customerId: string
 ): Promise<ExecutionResult> {
   const { action, reason } = decision;
 
@@ -61,6 +63,11 @@ export async function executeDecision(
           result: outcome,
           feeCharged: new Prisma.Decimal("2.00"),
         },
+      });
+
+      await prisma.customerContext.update({
+        where: { customerId },
+        data: { contactCountThisWeek: { increment: 1 } },
       });
 
       await prisma.failedTransaction.update({
