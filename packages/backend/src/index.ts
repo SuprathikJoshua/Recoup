@@ -11,7 +11,7 @@ const server = Fastify({
 await server.register(cors, {
   origin: [
     "http://localhost:5173",
-    "https://recoup-frontend.vercel.app/",
+    "https://recoup-frontend.vercel.app",
   ],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   credentials: true,
