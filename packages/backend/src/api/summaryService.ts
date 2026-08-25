@@ -20,6 +20,13 @@ export interface GuardRailTriggerCounts {
   lowConfidenceEscalation: number;
 }
 
+export interface DailyRecoveryStat {
+  date: string;
+  formattedDate: string;
+  amount: number;
+  count: number;
+}
+
 export interface EngineSummaryReport {
   totalRecovered: number;
   totalFeesSpent: number;
@@ -32,6 +39,7 @@ export interface EngineSummaryReport {
   statusCounts: Record<string, number>;
   escalatedExceptions: EscalatedException[];
   guardRailTriggers: GuardRailTriggerCounts;
+  dailyRecoveries: DailyRecoveryStat[];
 }
 
 /**
@@ -42,7 +50,8 @@ export async function getEngineSummary(): Promise<EngineSummaryReport> {
   // 1. Total Recovered Amount
   const recoveredTxns = await prisma.failedTransaction.findMany({
     where: { status: TxnStatus.RESOLVED_RECOVERED },
-    select: { amount: true },
+    select: { amount: true, failTimestamp: true },
+    orderBy: { failTimestamp: "asc" },
   });
   const totalRecovered = recoveredTxns.reduce(
     (sum, t) => sum + Number(t.amount),
@@ -156,6 +165,44 @@ export async function getEngineSummary(): Promise<EngineSummaryReport> {
     }
   }
 
+  // 8. 30-Day Daily ₹ Recovered Trajectory (bucketed by failTimestamp)
+  const dailyMap = new Map<string, { amount: number; count: number }>();
+  const now = new Date();
+
+  // Initialize last 30 daily buckets with 0
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+    const key = d.toISOString().split("T")[0]!;
+    dailyMap.set(key, { amount: 0, count: 0 });
+  }
+
+  for (const txn of recoveredTxns) {
+    const key = new Date(txn.failTimestamp).toISOString().split("T")[0]!;
+    if (dailyMap.has(key)) {
+      const entry = dailyMap.get(key)!;
+      entry.amount += Number(txn.amount);
+      entry.count += 1;
+    } else {
+      dailyMap.set(key, { amount: Number(txn.amount), count: 1 });
+    }
+  }
+
+  const dailyRecoveries: DailyRecoveryStat[] = Array.from(dailyMap.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(-30)
+    .map(([dateStr, val]) => {
+      const dateObj = new Date(dateStr);
+      return {
+        date: dateStr,
+        formattedDate: dateObj.toLocaleDateString("en-IN", {
+          month: "short",
+          day: "numeric",
+        }),
+        amount: Number(val.amount.toFixed(2)),
+        count: val.count,
+      };
+    });
+
   return {
     totalRecovered: Number(totalRecovered.toFixed(2)),
     totalFeesSpent: Number(totalFeesSpent.toFixed(2)),
@@ -168,5 +215,6 @@ export async function getEngineSummary(): Promise<EngineSummaryReport> {
     statusCounts,
     escalatedExceptions,
     guardRailTriggers,
+    dailyRecoveries,
   };
 }

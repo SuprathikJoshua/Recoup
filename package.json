@@ -21,5 +21,14 @@
 	},
 	"scripts": {
 		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"overrides": {
+		"deepmerge-ts": "^8.0.0"
+	},
+	"devDependencies": {
+		"prisma": "^7.9.1"
+	},
+	"dependencies": {
+		"@google/generative-ai": "^0.24.1"
 	}
 }

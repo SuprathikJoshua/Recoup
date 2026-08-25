@@ -75,6 +75,13 @@ export interface GuardRailTriggerCounts {
   lowConfidenceEscalation: number;
 }
 
+export interface DailyRecoveryStat {
+  date: string;
+  formattedDate: string;
+  amount: number;
+  count: number;
+}
+
 export interface EngineSummaryReport {
   totalRecovered: number;
   totalFeesSpent: number;
@@ -87,6 +94,7 @@ export interface EngineSummaryReport {
   statusCounts: Record<string, number>;
   escalatedExceptions: EscalatedException[];
   guardRailTriggers: GuardRailTriggerCounts;
+  dailyRecoveries?: DailyRecoveryStat[];
 }
 
 export interface PaginatedTransactions {
@@ -97,4 +105,10 @@ export interface PaginatedTransactions {
     total: number;
     totalPages: number;
   };
+}
+
+export interface CaseExplanationResponse {
+  txnId: string;
+  explanation: string;
+  source?: string;
 }

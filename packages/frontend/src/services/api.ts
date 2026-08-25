@@ -2,15 +2,12 @@ import type {
   EngineSummaryReport,
   PaginatedTransactions,
   FailedTransactionDetail,
+  CaseExplanationResponse,
 } from "../types/index.js";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL ||
-  (typeof window !== "undefined" && window.location.port === "5173"
-    ? "http://localhost:3000"
-    : "");
+export const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
-async function fetchJson<T>(endpoint: string): Promise<T> {
+export async function fetchJson<T>(endpoint: string): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
   const response = await fetch(url);
   if (!response.ok) {
@@ -50,4 +47,8 @@ export async function fetchTransactions(params: {
 
 export async function fetchTransactionDetail(txnId: string): Promise<FailedTransactionDetail> {
   return fetchJson<FailedTransactionDetail>(`/api/transactions/${encodeURIComponent(txnId)}`);
+}
+
+export async function fetchCaseExplanation(txnId: string): Promise<CaseExplanationResponse> {
+  return fetchJson<CaseExplanationResponse>(`/api/transactions/${encodeURIComponent(txnId)}/explain`);
 }

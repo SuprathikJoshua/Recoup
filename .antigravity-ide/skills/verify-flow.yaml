@@ -1,0 +1,28 @@
+﻿name: "Universal E2E Flow Verifier"
+command: "/verify-flow"
+description: "Dynamically analyzes the current workspace's routing and executes headless browser tests on primary user flows."
+tools_required: ["browser", "terminal", "file_reader"]
+instructions: |
+  Objective: Use the browser subagent to autonomously map and verify the primary user flows of the current project.
+
+  Phase 1: Discovery & Mapping (Do not skip)
+  1. Framework & Port Discovery: Analyze package.json and running terminal processes to identify the frontend framework and active ports. 
+  2. Route Mapping: Scan the repository routing structure to identify the 3 most critical user-facing routes.
+  3. API Discovery: Briefly inspect the network fetching utility to understand where the frontend expects the backend to be hosted.
+
+  Phase 2: Prerequisite Check
+  - Ping the discovered local server URLs. If the development servers are not running, halt execution immediately and instruct the user to start them.
+
+  Phase 3: Autonomous Execution
+  For each of the mapped critical routes, use the browser subagent to:
+  1. Navigate to the route.
+  2. Verify the UI renders completely without triggering error boundaries, fatal crashes, or infinite loading spinners.
+  3. Attempt basic interaction with the primary UI elements.
+  4. Monitor and record any browser console warnings, unhandled exceptions, or hydration mismatches.
+  5. Monitor the network tab for failed API requests.
+
+  Output: Provide a final status report containing:
+  - The framework and ports detected.
+  - The specific routes tested.
+  - Success/failure status for each UI interaction.
+  - A summary of any captured console errors or network failures.
