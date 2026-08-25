@@ -9,7 +9,10 @@ const server = Fastify({
 
 // Register CORS for Frontend Communication
 await server.register(cors, {
-  origin: true,
+  origin: [
+    "http://localhost:5173",
+    "https://recoup-frontend.vercel.app/",
+  ],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   credentials: true,
 });
