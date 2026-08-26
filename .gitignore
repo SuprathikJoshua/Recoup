@@ -21,9 +21,9 @@ out/
 .agents
 .gemini
 .gsd
-adapters
-docs
-scripts
+/adapters
+/docs
+/scripts
 PROJECT_RULES.md
 GSD-STYLE.md
 model_capabilities.yaml

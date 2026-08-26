@@ -20,7 +20,7 @@
 		"doc": "docs"
 	},
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
+		"test": "npm --prefix packages/backend run test"
 	},
 	"overrides": {
 		"deepmerge-ts": "^8.0.0"
