@@ -1,3 +1,4 @@
+import Razorpay from "razorpay";
 import { prisma } from "../config/db.js";
 import { logAudit } from "../audit/auditLogger.js";
 import {
@@ -20,17 +21,16 @@ export interface ExecutionResult {
   retryAttempt?: RetryAttempt;
 }
 
-/**
- * Simulates calling Razorpay API retry for payment representment.
- * Returns SUCCESS (70% probability) or FAILED (30% probability).
- */
-export function simulateRazorpayRetry(): AttemptResult {
-  return Math.random() < 0.70 ? AttemptResult.SUCCESS : AttemptResult.FAILED;
-}
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_TEST_KEY_ID || "rzp_test_dummy",
+  key_secret: process.env.RAZORPAY_TEST_KEY_SECRET || "dummy_secret",
+});
 
 /**
  * Executes the decider output by updating transaction status, recording retry attempts,
  * and creating audit logs for every branch.
+ * 
+ * For RETRY_SCHEDULED, makes a real minimal test-mode API call to Razorpay to verify network capability.
  * 
  * @param txnId Transaction identifier
  * @param decision Decider outcome including action, reason, and optional scheduled time
@@ -48,7 +48,33 @@ export async function executeDecision(
 
   switch (action) {
     case "RETRY_SCHEDULED": {
-      const outcome = simulateRazorpayRetry();
+      const transaction = await prisma.failedTransaction.findUnique({
+        where: { txnId },
+      });
+
+      if (!transaction) {
+        throw new Error(`Transaction with txnId "${txnId}" not found for retry execution.`);
+      }
+
+      let outcome: AttemptResult;
+      let orderId: string | undefined;
+
+      try {
+        const order = await razorpay.orders.create({
+          amount: Math.round(Number(transaction.amount) * 100),
+          currency: "INR",
+          receipt: `retry_${txnId}`,
+        });
+        orderId = (order as { id: string }).id;
+        outcome = AttemptResult.SUCCESS;
+      } catch (error) {
+        console.warn(
+          `Razorpay API retry call rejected or failed for txn ${txnId}:`,
+          error instanceof Error ? error.message : error
+        );
+        outcome = AttemptResult.FAILED;
+      }
+
       const nextStatus =
         outcome === AttemptResult.SUCCESS
           ? TxnStatus.RESOLVED_RECOVERED
@@ -75,10 +101,15 @@ export async function executeDecision(
         data: { status: nextStatus },
       });
 
+      const auditMessage =
+        outcome === AttemptResult.SUCCESS
+          ? `Executed Razorpay API retry attempt #${currentAttemptsCount + 1}: Result ${outcome} (Order ID: ${orderId || "N/A"}). ${reason}`
+          : `Executed Razorpay API retry attempt #${currentAttemptsCount + 1}: Result ${outcome} (Razorpay test call rejected/network failed). ${reason}`;
+
       await logAudit(
         txnId,
         `EXECUTE_${action}`,
-        `Executed Razorpay API retry attempt #${currentAttemptsCount + 1}: Result ${outcome}. ${reason}`
+        auditMessage
       );
 
       return {
