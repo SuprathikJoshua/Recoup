@@ -194,11 +194,11 @@ describe("Classifier Second Reasoning Pass (corroborate.ts)", () => {
     vi.spyOn(prisma.failedTransaction, "update").mockResolvedValue(sampleTxn as any);
 
     const loggedEvents: { decisionType: string; reasonText: string; score?: number | null }[] = [];
-    vi.spyOn(prisma.auditLog, "create").mockImplementation(async ({ data }: any) => {
+    vi.spyOn(prisma.auditLog, "create").mockImplementation((async ({ data }: any) => {
       loggedEvents.push({ decisionType: data.decisionType, reasonText: data.reasonText, score: data.confidenceScore });
       return { id: `log_${loggedEvents.length}`, ...data } as any;
-    });
-    vi.spyOn(prisma.auditLog, "findMany").mockImplementation(async () => loggedEvents as any);
+    }) as any);
+    vi.spyOn(prisma.auditLog, "findMany").mockImplementation((async () => loggedEvents as any) as any);
     vi.spyOn(retryExecutor.razorpay.orders, "create").mockResolvedValue({ id: "order_mock" } as any);
 
     const result = await processTransaction(sampleTxn as any);
@@ -234,11 +234,11 @@ describe("Classifier Second Reasoning Pass (corroborate.ts)", () => {
     vi.spyOn(prisma.failedTransaction, "update").mockResolvedValue(mdTxn as any);
 
     const loggedEvents: { decisionType: string; reasonText: string; score?: number | null }[] = [];
-    vi.spyOn(prisma.auditLog, "create").mockImplementation(async ({ data }: any) => {
+    vi.spyOn(prisma.auditLog, "create").mockImplementation((async ({ data }: any) => {
       loggedEvents.push({ decisionType: data.decisionType, reasonText: data.reasonText, score: data.confidenceScore });
       return { id: `log_${loggedEvents.length}`, ...data } as any;
-    });
-    vi.spyOn(prisma.auditLog, "findMany").mockImplementation(async () => loggedEvents as any);
+    }) as any);
+    vi.spyOn(prisma.auditLog, "findMany").mockImplementation((async () => loggedEvents as any) as any);
 
     await processTransaction(mdTxn as any);
 

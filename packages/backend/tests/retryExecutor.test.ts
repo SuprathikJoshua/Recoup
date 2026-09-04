@@ -163,10 +163,10 @@ describe("executeDecision - Interactive Prisma Transactions", () => {
   it("should wrap RETRY_SCHEDULED DB writes inside prisma.$transaction with external Razorpay call beforehand", async () => {
     const callSequence: string[] = [];
 
-    vi.spyOn(prisma.failedTransaction, "findUnique").mockImplementation(async () => {
+    vi.spyOn(prisma.failedTransaction, "findUnique").mockImplementation((async () => {
       callSequence.push("prisma.failedTransaction.findUnique");
       return mockTxn as any;
-    });
+    }) as any);
 
     vi.spyOn(razorpay.orders, "create").mockImplementation(async () => {
       callSequence.push("razorpay.orders.create");

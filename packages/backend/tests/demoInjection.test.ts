@@ -120,12 +120,12 @@ describe("Live Demo Injection & Shared processTransaction Engine Tests", () => {
 
     vi.spyOn(prisma.customerContext, "findMany").mockResolvedValue([{ customerId: "CUST_DEMO_01" }] as any);
     vi.spyOn(prisma.customerContext, "findUnique").mockResolvedValue(baseCustomer as any);
-    vi.spyOn(prisma.failedTransaction, "create").mockImplementation(async ({ data }: any) => ({
+    vi.spyOn(prisma.failedTransaction, "create").mockImplementation((async ({ data }: any) => ({
       ...data,
       id: "demo_id_1",
       createdAt: new Date(),
-    }));
-    vi.spyOn(prisma.failedTransaction, "findUnique").mockImplementation(async () => sampleTxn as any);
+    })) as any);
+    vi.spyOn(prisma.failedTransaction, "findUnique").mockImplementation((async () => sampleTxn as any) as any);
     vi.spyOn(prisma.failedTransaction, "update").mockResolvedValue({ ...sampleTxn, status: TxnStatus.ESCALATED } as any);
     vi.spyOn(prisma.retryAttempt, "findMany").mockResolvedValue([]);
     vi.spyOn(prisma.auditLog, "create").mockResolvedValue({} as any);
