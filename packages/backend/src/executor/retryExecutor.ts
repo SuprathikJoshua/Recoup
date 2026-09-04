@@ -126,27 +126,6 @@ export async function executeDecision(
           ? TxnStatus.RESOLVED_RECOVERED
           : TxnStatus.PENDING;
 
-      const attempt = await prisma.retryAttempt.create({
-        data: {
-          txnId,
-          attemptNo: currentAttemptsCount + 1,
-          attemptTimestamp: new Date(),
-          actionTaken: "RAZORPAY_API_RETRY",
-          result: outcome,
-          feeCharged: new Prisma.Decimal("2.00"),
-        },
-      });
-
-      await prisma.customerContext.update({
-        where: { customerId },
-        data: { contactCountThisWeek: { increment: 1 } },
-      });
-
-      await prisma.failedTransaction.update({
-        where: { txnId },
-        data: { status: nextStatus },
-      });
-
       // Step 3: Distinct Audit Log Messages distinguishing API transport failure vs simulated settlement decline
       let auditMessage: string;
       if (outcome === AttemptResult.SUCCESS) {
@@ -157,11 +136,36 @@ export async function executeDecision(
         auditMessage = `Executed Razorpay API retry attempt #${currentAttemptsCount + 1}: Result ${outcome} (Order ID: ${orderId || "N/A"} - Order created successfully but settlement declined at bank-side — simulated, test-mode has no real mandate debit). ${reason}`;
       }
 
-      await logAudit(
-        txnId,
-        `EXECUTE_${action}`,
-        auditMessage
-      );
+      const attempt = await prisma.$transaction(async (tx) => {
+        const createdAttempt = await tx.retryAttempt.create({
+          data: {
+            txnId,
+            attemptNo: currentAttemptsCount + 1,
+            attemptTimestamp: new Date(),
+            actionTaken: "RAZORPAY_API_RETRY",
+            result: outcome,
+            feeCharged: new Prisma.Decimal("2.00"),
+          },
+        });
+
+        await tx.customerContext.update({
+          where: { customerId },
+          data: { contactCountThisWeek: { increment: 1 } },
+        });
+
+        await tx.failedTransaction.update({
+          where: { txnId },
+          data: { status: nextStatus },
+        });
+
+        await logAudit(
+          txnId,
+          `EXECUTE_${action}`,
+          auditMessage
+        );
+
+        return createdAttempt;
+      });
 
       return {
         txnId,
@@ -172,16 +176,18 @@ export async function executeDecision(
     }
 
     case "RESOLVED_UNRECOVERABLE": {
-      await prisma.failedTransaction.update({
-        where: { txnId },
-        data: { status: TxnStatus.RESOLVED_UNRECOVERABLE },
-      });
+      await prisma.$transaction(async (tx) => {
+        await tx.failedTransaction.update({
+          where: { txnId },
+          data: { status: TxnStatus.RESOLVED_UNRECOVERABLE },
+        });
 
-      await logAudit(
-        txnId,
-        `EXECUTE_${action}`,
-        `Marked unrecoverable: ${reason}`
-      );
+        await logAudit(
+          txnId,
+          `EXECUTE_${action}`,
+          `Marked unrecoverable: ${reason}`
+        );
+      });
 
       return {
         txnId,
@@ -191,16 +197,18 @@ export async function executeDecision(
     }
 
     case "MARKED_DEAD": {
-      await prisma.failedTransaction.update({
-        where: { txnId },
-        data: { status: TxnStatus.DEAD },
-      });
+      await prisma.$transaction(async (tx) => {
+        await tx.failedTransaction.update({
+          where: { txnId },
+          data: { status: TxnStatus.DEAD },
+        });
 
-      await logAudit(
-        txnId,
-        `EXECUTE_${action}`,
-        `Marked dead: ${reason}`
-      );
+        await logAudit(
+          txnId,
+          `EXECUTE_${action}`,
+          `Marked dead: ${reason}`
+        );
+      });
 
       return {
         txnId,
@@ -210,16 +218,18 @@ export async function executeDecision(
     }
 
     case "ESCALATED": {
-      await prisma.failedTransaction.update({
-        where: { txnId },
-        data: { status: TxnStatus.ESCALATED },
-      });
+      await prisma.$transaction(async (tx) => {
+        await tx.failedTransaction.update({
+          where: { txnId },
+          data: { status: TxnStatus.ESCALATED },
+        });
 
-      await logAudit(
-        txnId,
-        `EXECUTE_${action}`,
-        `Escalated to human review: ${reason}`
-      );
+        await logAudit(
+          txnId,
+          `EXECUTE_${action}`,
+          `Escalated to human review: ${reason}`
+        );
+      });
 
       return {
         txnId,
@@ -230,16 +240,18 @@ export async function executeDecision(
 
     case "SKIPPED_TOO_SOON":
     case "SKIPPED_CONTACT_CAP": {
-      await prisma.failedTransaction.update({
-        where: { txnId },
-        data: { status: TxnStatus.PENDING },
-      });
+      await prisma.$transaction(async (tx) => {
+        await tx.failedTransaction.update({
+          where: { txnId },
+          data: { status: TxnStatus.PENDING },
+        });
 
-      await logAudit(
-        txnId,
-        `EXECUTE_${action}`,
-        `Skipped retry execution: ${reason}`
-      );
+        await logAudit(
+          txnId,
+          `EXECUTE_${action}`,
+          `Skipped retry execution: ${reason}`
+        );
+      });
 
       return {
         txnId,
@@ -249,16 +261,18 @@ export async function executeDecision(
     }
 
     default: {
-      await prisma.failedTransaction.update({
-        where: { txnId },
-        data: { status: TxnStatus.ESCALATED },
-      });
+      await prisma.$transaction(async (tx) => {
+        await tx.failedTransaction.update({
+          where: { txnId },
+          data: { status: TxnStatus.ESCALATED },
+        });
 
-      await logAudit(
-        txnId,
-        "EXECUTE_UNKNOWN",
-        `Unknown action "${action}" encountered. Defaulting to ESCALATED. ${reason}`
-      );
+        await logAudit(
+          txnId,
+          "EXECUTE_UNKNOWN",
+          `Unknown action "${action}" encountered. Defaulting to ESCALATED. ${reason}`
+        );
+      });
 
       return {
         txnId,

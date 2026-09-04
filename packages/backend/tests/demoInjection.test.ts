@@ -38,6 +38,7 @@ describe("Live Demo Injection & Shared processTransaction Engine Tests", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(prisma, "$transaction").mockImplementation(async (cb: any) => cb(prisma));
   });
 
   it("should process a transaction end-to-end and return complete lifecycle result", async () => {

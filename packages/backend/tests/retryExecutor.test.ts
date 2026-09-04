@@ -34,6 +34,7 @@ describe("executeDecision - Realistic Settlement Layer & Distinct Audit Logging"
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(prisma, "$transaction").mockImplementation(async (cb: any) => cb(prisma));
   });
 
   it("should treat Razorpay API failure as automatic FAILED and log 'Razorpay order creation failed'", async () => {
@@ -146,3 +147,170 @@ describe("executeDecision - Realistic Settlement Layer & Distinct Audit Logging"
     );
   });
 });
+
+describe("executeDecision - Interactive Prisma Transactions", () => {
+  const mockTxn = {
+    txnId: "TXN_TX_1",
+    customerId: "CUST_TX_1",
+    amount: new Prisma.Decimal("2500.00"),
+    failCode: "01",
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("should wrap RETRY_SCHEDULED DB writes inside prisma.$transaction with external Razorpay call beforehand", async () => {
+    const callSequence: string[] = [];
+
+    vi.spyOn(prisma.failedTransaction, "findUnique").mockImplementation(async () => {
+      callSequence.push("prisma.failedTransaction.findUnique");
+      return mockTxn as any;
+    });
+
+    vi.spyOn(razorpay.orders, "create").mockImplementation(async () => {
+      callSequence.push("razorpay.orders.create");
+      return { id: "order_tx_test" } as any;
+    });
+
+    const mockAttempt = {
+      id: "att_tx_1",
+      txnId: "TXN_TX_1",
+      attemptNo: 1,
+      attemptTimestamp: new Date(),
+      actionTaken: "RAZORPAY_API_RETRY",
+      result: AttemptResult.SUCCESS,
+      feeCharged: new Prisma.Decimal("2.00"),
+    };
+
+    const mockTx = {
+      retryAttempt: {
+        create: vi.fn().mockImplementation(async () => {
+          callSequence.push("tx.retryAttempt.create");
+          return mockAttempt;
+        }),
+      },
+      customerContext: {
+        update: vi.fn().mockImplementation(async () => {
+          callSequence.push("tx.customerContext.update");
+          return {};
+        }),
+      },
+      failedTransaction: {
+        update: vi.fn().mockImplementation(async () => {
+          callSequence.push("tx.failedTransaction.update");
+          return {};
+        }),
+      },
+    };
+
+    const transactionSpy = vi.spyOn(prisma, "$transaction").mockImplementation(async (callback: any) => {
+      callSequence.push("prisma.$transaction_START");
+      const res = await callback(mockTx);
+      callSequence.push("prisma.$transaction_END");
+      return res;
+    });
+
+    vi.spyOn(auditLogger, "logAudit").mockImplementation(async () => {
+      callSequence.push("logAudit");
+      return {} as any;
+    });
+
+    vi.spyOn(Math, "random").mockReturnValue(0.1); // Success
+
+    const result = await executeDecision(
+      "TXN_TX_1",
+      { action: "RETRY_SCHEDULED", reason: "Salary window" },
+      0,
+      "CUST_TX_1",
+      "INSUFFICIENT_FUND"
+    );
+
+    expect(transactionSpy).toHaveBeenCalledTimes(1);
+    expect(mockTx.retryAttempt.create).toHaveBeenCalledTimes(1);
+    expect(mockTx.customerContext.update).toHaveBeenCalledWith({
+      where: { customerId: "CUST_TX_1" },
+      data: { contactCountThisWeek: { increment: 1 } },
+    });
+    expect(mockTx.failedTransaction.update).toHaveBeenCalledWith({
+      where: { txnId: "TXN_TX_1" },
+      data: { status: TxnStatus.RESOLVED_RECOVERED },
+    });
+    expect(result.retryAttempt).toEqual(mockAttempt);
+
+    // Verify order of calls: Razorpay call occurs OUTSIDE and BEFORE prisma.$transaction
+    expect(callSequence).toEqual([
+      "prisma.failedTransaction.findUnique",
+      "razorpay.orders.create",
+      "prisma.$transaction_START",
+      "tx.retryAttempt.create",
+      "tx.customerContext.update",
+      "tx.failedTransaction.update",
+      "logAudit",
+      "prisma.$transaction_END",
+    ]);
+  });
+
+  it("should wrap non-retry branches (RESOLVED_UNRECOVERABLE, MARKED_DEAD, ESCALATED, SKIPPED) in prisma.$transaction", async () => {
+    const mockTx = {
+      failedTransaction: {
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+
+    const transactionSpy = vi.spyOn(prisma, "$transaction").mockImplementation(async (callback: any) => {
+      return await callback(mockTx);
+    });
+    const logAuditSpy = vi.spyOn(auditLogger, "logAudit").mockResolvedValue({} as any);
+
+    // Test RESOLVED_UNRECOVERABLE
+    await executeDecision("TXN_1", { action: "RESOLVED_UNRECOVERABLE", reason: "Mandate expired" }, 0, "CUST_1");
+    expect(transactionSpy).toHaveBeenCalled();
+    expect(mockTx.failedTransaction.update).toHaveBeenCalledWith({
+      where: { txnId: "TXN_1" },
+      data: { status: TxnStatus.RESOLVED_UNRECOVERABLE },
+    });
+    expect(logAuditSpy).toHaveBeenCalledWith("TXN_1", "EXECUTE_RESOLVED_UNRECOVERABLE", expect.stringContaining("Mandate expired"));
+
+    // Test MARKED_DEAD
+    transactionSpy.mockClear();
+    mockTx.failedTransaction.update.mockClear();
+    await executeDecision("TXN_2", { action: "MARKED_DEAD", reason: "Max attempts reached" }, 3, "CUST_1");
+    expect(transactionSpy).toHaveBeenCalled();
+    expect(mockTx.failedTransaction.update).toHaveBeenCalledWith({
+      where: { txnId: "TXN_2" },
+      data: { status: TxnStatus.DEAD },
+    });
+
+    // Test ESCALATED
+    transactionSpy.mockClear();
+    mockTx.failedTransaction.update.mockClear();
+    await executeDecision("TXN_3", { action: "ESCALATED", reason: "Unknown failCode" }, 0, "CUST_1");
+    expect(transactionSpy).toHaveBeenCalled();
+    expect(mockTx.failedTransaction.update).toHaveBeenCalledWith({
+      where: { txnId: "TXN_3" },
+      data: { status: TxnStatus.ESCALATED },
+    });
+
+    // Test SKIPPED_TOO_SOON
+    transactionSpy.mockClear();
+    mockTx.failedTransaction.update.mockClear();
+    await executeDecision("TXN_4", { action: "SKIPPED_TOO_SOON", reason: "Under min retry gap" }, 1, "CUST_1");
+    expect(transactionSpy).toHaveBeenCalled();
+    expect(mockTx.failedTransaction.update).toHaveBeenCalledWith({
+      where: { txnId: "TXN_4" },
+      data: { status: TxnStatus.PENDING },
+    });
+
+    // Test default / unknown action
+    transactionSpy.mockClear();
+    mockTx.failedTransaction.update.mockClear();
+    await executeDecision("TXN_5", { action: "SOMETHING_WEIRD", reason: "Unhandled" }, 0, "CUST_1");
+    expect(transactionSpy).toHaveBeenCalled();
+    expect(mockTx.failedTransaction.update).toHaveBeenCalledWith({
+      where: { txnId: "TXN_5" },
+      data: { status: TxnStatus.ESCALATED },
+    });
+  });
+});
+

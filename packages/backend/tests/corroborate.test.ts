@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { corroborate } from "../src/classifier/corroborate.js";
 import { classify } from "../src/classifier/classify.js";
 import { processTransaction } from "../src/engine/processTransaction.js";
@@ -8,6 +8,11 @@ import { AttemptResult, PaymentMode, TxnStatus, Prisma } from "../src/generated/
 
 describe("Classifier Second Reasoning Pass (corroborate.ts)", () => {
   const fixedNow = new Date("2026-08-24T10:00:00.000Z");
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(prisma, "$transaction").mockImplementation(async (cb: any) => cb(prisma));
+  });
 
   const baseCustomer = {
     customerId: "CUST_CORROB_1",
