@@ -5,9 +5,10 @@ import {
   MAX_CONTACTS_PER_WEEK,
   CONFIDENCE_THRESHOLD_FOR_DEAD,
 } from "../config/rules.js";
-import type { CustomerContext, RetryAttempt, Prisma } from "../generated/prisma/client.js";
+import type { CustomerContext, RetryAttempt, Prisma, PaymentMode } from "../generated/prisma/client.js";
 
 export interface DeciderInput {
+  paymentMode: PaymentMode | "UPI_AUTOPAY" | "NACH" | "EMANDATE";
   bucket: string;
   confidence: number;
   customer: CustomerContext;
@@ -30,16 +31,21 @@ const HARD_FAILURE_BUCKETS = new Set([
 
 /**
  * Calculates the next future calendar date matching any of the customer's debit pattern days.
+ * Supports a minimum offset in days to honor rail-specific clearing/grace periods (e.g. NACH T+2).
  */
-function getNextDebitPatternDate(patternDays: number[], fromDate: Date): Date {
+function getNextDebitPatternDate(
+  patternDays: number[],
+  fromDate: Date,
+  minOffsetDays: number = 1
+): Date {
   if (!patternDays || patternDays.length === 0) {
     const fallback = new Date(fromDate);
-    fallback.setDate(fallback.getDate() + 1);
+    fallback.setDate(fallback.getDate() + minOffsetDays);
     fallback.setHours(9, 0, 0, 0);
     return fallback;
   }
 
-  for (let offset = 1; offset <= 35; offset++) {
+  for (let offset = minOffsetDays; offset <= minOffsetDays + 34; offset++) {
     const candidate = new Date(fromDate);
     candidate.setDate(fromDate.getDate() + offset);
     candidate.setHours(9, 0, 0, 0);
@@ -49,7 +55,7 @@ function getNextDebitPatternDate(patternDays: number[], fromDate: Date): Date {
   }
 
   const fallback = new Date(fromDate);
-  fallback.setDate(fallback.getDate() + 1);
+  fallback.setDate(fallback.getDate() + minOffsetDays);
   fallback.setHours(9, 0, 0, 0);
   return fallback;
 }
@@ -58,11 +64,12 @@ function getNextDebitPatternDate(patternDays: number[], fromDate: Date): Date {
  * Pure decision engine executing deterministic precedence rules.
  * No database calls, no network side-effects.
  * 
- * @param input Decider parameters including bucket, confidence, customer context, and attempt history
+ * @param input Decider parameters including paymentMode, bucket, confidence, customer context, and attempt history
  * @returns Decision result with action, optional scheduled timestamp, and explanation reason
  */
 export function decide(input: DeciderInput): DeciderResult {
   const {
+    paymentMode,
     bucket,
     confidence,
     customer,
@@ -132,23 +139,49 @@ export function decide(input: DeciderInput): DeciderResult {
     };
   }
 
-  // 7. INSUFFICIENT_FUND -> schedule on next debit pattern day
+  // --- Mode-Specific Rules (Payment Rail Differentiation) ---
+
+  // Mode-Specific Rule A: NACH legal T+2 settlement grace period for INSUFFICIENT_FUND
+  if (paymentMode === "NACH" && bucket === "INSUFFICIENT_FUND") {
+    let scheduledFor = getNextDebitPatternDate(customer.debitPatternDays, now, 2);
+    const minNachTime = now.getTime() + 2 * 24 * 60 * 60 * 1000;
+    if (scheduledFor.getTime() < minNachTime) {
+      scheduledFor = new Date(minNachTime);
+    }
+    return {
+      action: "RETRY_SCHEDULED",
+      scheduledFor,
+      reason: "NACH legal T+2 settlement grace period applied (scheduled at least 2 days out, aligned with salary/debit pattern)",
+    };
+  }
+
+  // Mode-Specific Rule B: BANK_ERROR timing split by payment rail (+3h for UPI_AUTOPAY, +12h for NACH and EMANDATE)
+  if (bucket === "BANK_ERROR") {
+    if (paymentMode === "UPI_AUTOPAY") {
+      const scheduledFor = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+      return {
+        action: "RETRY_SCHEDULED",
+        scheduledFor,
+        reason: "Transient bank error, fast retry (UPI_AUTOPAY: +3 hours)",
+      };
+    } else {
+      // NACH or EMANDATE: slower bank-side error recovery in practice
+      const scheduledFor = new Date(now.getTime() + 12 * 60 * 60 * 1000);
+      return {
+        action: "RETRY_SCHEDULED",
+        scheduledFor,
+        reason: `Transient bank error, slower rail recovery (${paymentMode}: +12 hours)`,
+      };
+    }
+  }
+
+  // 7. INSUFFICIENT_FUND -> schedule on next debit pattern day (for non-NACH rails)
   if (bucket === "INSUFFICIENT_FUND") {
     const scheduledFor = getNextDebitPatternDate(customer.debitPatternDays, now);
     return {
       action: "RETRY_SCHEDULED",
       scheduledFor,
       reason: "Aligned with historical salary/debit pattern",
-    };
-  }
-
-  // 8. BANK_ERROR -> transient bank error, fast retry (now + 3 hours)
-  if (bucket === "BANK_ERROR") {
-    const scheduledFor = new Date(now.getTime() + 3 * 60 * 60 * 1000);
-    return {
-      action: "RETRY_SCHEDULED",
-      scheduledFor,
-      reason: "Transient bank error, fast retry",
     };
   }
 

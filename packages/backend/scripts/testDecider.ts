@@ -1,6 +1,6 @@
 import { classify } from "../src/classifier/classify.js";
 import { decide } from "../src/decider/decide.js";
-import { Prisma, AttemptResult } from "../src/generated/prisma/client.js";
+import { Prisma, AttemptResult, PaymentMode } from "../src/generated/prisma/client.js";
 
 const fixedNow = new Date("2026-08-24T10:00:00.000Z");
 
@@ -23,6 +23,7 @@ const test1Attempts = [
   { id: "3", txnId: "TXN_1", attemptNo: 3, attemptTimestamp: new Date("2026-08-15"), actionTaken: "RETRY", result: AttemptResult.FAILED, feeCharged: new Prisma.Decimal(25) },
 ];
 const res1 = decide({
+  paymentMode: PaymentMode.UPI_AUTOPAY,
   bucket: "INSUFFICIENT_FUND",
   confidence: 0.95,
   customer: baseCustomer,
@@ -38,6 +39,7 @@ const test2Attempts = [
   { id: "1", txnId: "TXN_2", attemptNo: 1, attemptTimestamp: new Date("2026-08-22T10:00:00.000Z"), actionTaken: "RETRY", result: AttemptResult.FAILED, feeCharged: new Prisma.Decimal(0) },
 ];
 const res2 = decide({
+  paymentMode: PaymentMode.UPI_AUTOPAY,
   bucket: "INSUFFICIENT_FUND",
   confidence: 0.95,
   customer: baseCustomer,
@@ -53,6 +55,7 @@ const test3Attempts = [
   { id: "1", txnId: "TXN_3", attemptNo: 1, attemptTimestamp: new Date("2026-08-10"), actionTaken: "RETRY", result: AttemptResult.FAILED, feeCharged: new Prisma.Decimal(60) },
 ];
 const res3 = decide({
+  paymentMode: PaymentMode.UPI_AUTOPAY,
   bucket: "INSUFFICIENT_FUND",
   confidence: 0.95,
   customer: baseCustomer,
@@ -66,6 +69,7 @@ console.log("   Result:", res3);
 // Test Case 4: Unknown Failure Code
 const class4 = classify({ failCode: "ZZ" });
 const res4 = decide({
+  paymentMode: PaymentMode.UPI_AUTOPAY,
   bucket: class4.bucket,
   confidence: class4.confidence,
   customer: baseCustomer,
@@ -79,6 +83,7 @@ console.log("   Result:", res4);
 
 // Test Case 5: Low Confidence Escalation
 const res5 = decide({
+  paymentMode: PaymentMode.UPI_AUTOPAY,
   bucket: "INSUFFICIENT_FUND",
   confidence: 0.60, // < 0.70 threshold
   customer: baseCustomer,
@@ -92,6 +97,7 @@ console.log("   Result:", res5);
 // Test Case 6: Weekly Contact Cap Reached
 const cappedCustomer = { ...baseCustomer, contactCountThisWeek: 2 };
 const res6 = decide({
+  paymentMode: PaymentMode.UPI_AUTOPAY,
   bucket: "INSUFFICIENT_FUND",
   confidence: 0.95,
   customer: cappedCustomer,
@@ -104,6 +110,7 @@ console.log("   Result:", res6);
 
 // Test Case 7: INSUFFICIENT_FUND Scheduled on Debit Pattern Day
 const res7 = decide({
+  paymentMode: PaymentMode.UPI_AUTOPAY,
   bucket: "INSUFFICIENT_FUND",
   confidence: 0.95,
   customer: { ...baseCustomer, debitPatternDays: [1, 2, 3] },
@@ -117,6 +124,7 @@ console.log("   Result:", res7);
 // Test Case 8: Transient BANK_ERROR Fast Retry (+3h)
 const class8 = classify({ failCode: "BE" });
 const res8 = decide({
+  paymentMode: PaymentMode.UPI_AUTOPAY,
   bucket: class8.bucket,
   confidence: class8.confidence,
   customer: baseCustomer,
@@ -132,6 +140,7 @@ console.log("   Result:", res8);
 for (const code of ["MD", "WA", "FD"]) {
   const classified = classify({ failCode: code });
   const decision = decide({
+    paymentMode: PaymentMode.UPI_AUTOPAY,
     bucket: classified.bucket,
     confidence: classified.confidence,
     customer: baseCustomer,

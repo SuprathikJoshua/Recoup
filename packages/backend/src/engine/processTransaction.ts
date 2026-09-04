@@ -97,6 +97,7 @@ export async function processTransaction(
 
   // 4. Make Decision
   const decision = decide({
+    paymentMode: txn.paymentMode,
     bucket: classification.bucket,
     confidence: classification.confidence,
     customer,

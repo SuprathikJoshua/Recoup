@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { classify } from "../src/classifier/classify.js";
 import { decide } from "../src/decider/decide.js";
-import { Prisma, AttemptResult } from "../src/generated/prisma/client.js";
+import { Prisma, AttemptResult, PaymentMode } from "../src/generated/prisma/client.js";
 
 describe("Decider Engine & Failure Classification Tests", () => {
   const fixedNow = new Date("2026-08-24T10:00:00.000Z");
@@ -21,6 +21,7 @@ describe("Decider Engine & Failure Classification Tests", () => {
     expect(classification.confidence).toBeGreaterThanOrEqual(0.70);
 
     const result = decide({
+      paymentMode: PaymentMode.UPI_AUTOPAY,
       bucket: classification.bucket,
       confidence: classification.confidence,
       customer: baseCustomer,
@@ -41,6 +42,7 @@ describe("Decider Engine & Failure Classification Tests", () => {
     expect(classification.confidence).toBeGreaterThanOrEqual(0.70);
 
     const result = decide({
+      paymentMode: PaymentMode.UPI_AUTOPAY,
       bucket: classification.bucket,
       confidence: classification.confidence,
       customer: baseCustomer,
@@ -64,6 +66,7 @@ describe("Decider Engine & Failure Classification Tests", () => {
     const classification = classify({ failCode: "01" });
 
     const result = decide({
+      paymentMode: PaymentMode.UPI_AUTOPAY,
       bucket: classification.bucket,
       confidence: classification.confidence,
       customer: saturatedCustomer,
@@ -86,6 +89,7 @@ describe("Decider Engine & Failure Classification Tests", () => {
     ];
 
     const result = decide({
+      paymentMode: PaymentMode.UPI_AUTOPAY,
       bucket: "INSUFFICIENT_FUND",
       confidence: 0.95,
       customer: baseCustomer,
@@ -105,6 +109,7 @@ describe("Decider Engine & Failure Classification Tests", () => {
     ];
 
     const result = decide({
+      paymentMode: PaymentMode.UPI_AUTOPAY,
       bucket: "INSUFFICIENT_FUND",
       confidence: 0.95,
       customer: baseCustomer,
@@ -124,6 +129,7 @@ describe("Decider Engine & Failure Classification Tests", () => {
     ];
 
     const result = decide({
+      paymentMode: PaymentMode.UPI_AUTOPAY,
       bucket: "INSUFFICIENT_FUND",
       confidence: 0.95,
       customer: baseCustomer,
@@ -142,6 +148,7 @@ describe("Decider Engine & Failure Classification Tests", () => {
     expect(classification.bucket).toBe("UNKNOWN");
 
     const result = decide({
+      paymentMode: PaymentMode.UPI_AUTOPAY,
       bucket: classification.bucket,
       confidence: classification.confidence,
       customer: baseCustomer,
@@ -154,12 +161,13 @@ describe("Decider Engine & Failure Classification Tests", () => {
     expect(result.reason).toBe("Unrecognized failure code, needs human review");
   });
 
-  // Test 8: Transient bank error triggers fast retry (3 hours)
-  it("should schedule a fast retry (+3 hours) for transient bank errors", () => {
+  // Test 8: Transient bank error triggers fast retry (3 hours) for UPI_AUTOPAY
+  it("should schedule a fast retry (+3 hours) for transient bank errors on UPI_AUTOPAY", () => {
     const classification = classify({ failCode: "BE" });
     expect(classification.bucket).toBe("BANK_ERROR");
 
     const result = decide({
+      paymentMode: PaymentMode.UPI_AUTOPAY,
       bucket: classification.bucket,
       confidence: classification.confidence,
       customer: baseCustomer,
@@ -169,8 +177,99 @@ describe("Decider Engine & Failure Classification Tests", () => {
     });
 
     expect(result.action).toBe("RETRY_SCHEDULED");
-    expect(result.reason).toBe("Transient bank error, fast retry");
+    expect(result.reason).toContain("Transient bank error, fast retry");
+    expect(result.reason).toContain("UPI_AUTOPAY");
     const expectedTime = new Date(fixedNow.getTime() + 3 * 60 * 60 * 1000);
     expect(result.scheduledFor?.toISOString()).toBe(expectedTime.toISOString());
+  });
+
+  // Test 9: NACH T+2 Settlement Grace Period minimum-gap enforcement
+  it("should enforce at least 2 days minimum gap for NACH INSUFFICIENT_FUND even if debit pattern is sooner", () => {
+    // Tomorrow is Aug 25 (only 1 day away from Aug 24)
+    const nextDayCustomer = {
+      ...baseCustomer,
+      debitPatternDays: [25], // only 1 day out
+    };
+
+    // 1. UPI_AUTOPAY would happily debit tomorrow (1 day out)
+    const upiResult = decide({
+      paymentMode: PaymentMode.UPI_AUTOPAY,
+      bucket: "INSUFFICIENT_FUND",
+      confidence: 0.95,
+      customer: nextDayCustomer,
+      existingAttempts: [],
+      transactionAmount: new Prisma.Decimal(1500),
+      now: fixedNow,
+    });
+    expect(upiResult.action).toBe("RETRY_SCHEDULED");
+    const upiDiffDays = (upiResult.scheduledFor!.getTime() - fixedNow.getTime()) / (1000 * 60 * 60 * 24);
+    expect(upiDiffDays).toBeLessThan(2);
+
+    // 2. NACH must enforce at least 2 days out minimum (legal T+2 settlement grace period)
+    const nachResult = decide({
+      paymentMode: PaymentMode.NACH,
+      bucket: "INSUFFICIENT_FUND",
+      confidence: 0.95,
+      customer: nextDayCustomer,
+      existingAttempts: [],
+      transactionAmount: new Prisma.Decimal(1500),
+      now: fixedNow,
+    });
+    expect(nachResult.action).toBe("RETRY_SCHEDULED");
+    expect(nachResult.scheduledFor).toBeDefined();
+    const nachDiffDays = (nachResult.scheduledFor!.getTime() - fixedNow.getTime()) / (1000 * 60 * 60 * 24);
+    expect(nachDiffDays).toBeGreaterThanOrEqual(2);
+    expect(nachResult.reason).toContain("NACH legal T+2 settlement grace period applied");
+  });
+
+  // Test 10: BANK_ERROR timing split across payment rails (UPI +3h vs NACH/EMANDATE +12h)
+  it("should apply +3h retry for UPI_AUTOPAY and +12h retry for NACH and EMANDATE on BANK_ERROR", () => {
+    // UPI_AUTOPAY: fast retry (+3 hours)
+    const upiResult = decide({
+      paymentMode: PaymentMode.UPI_AUTOPAY,
+      bucket: "BANK_ERROR",
+      confidence: 0.85,
+      customer: baseCustomer,
+      existingAttempts: [],
+      transactionAmount: new Prisma.Decimal(2000),
+      now: fixedNow,
+    });
+    expect(upiResult.action).toBe("RETRY_SCHEDULED");
+    expect(upiResult.scheduledFor?.toISOString()).toBe(
+      new Date(fixedNow.getTime() + 3 * 60 * 60 * 1000).toISOString()
+    );
+    expect(upiResult.reason).toContain("UPI_AUTOPAY: +3 hours");
+
+    // NACH: slower recovery rail (+12 hours)
+    const nachResult = decide({
+      paymentMode: PaymentMode.NACH,
+      bucket: "BANK_ERROR",
+      confidence: 0.85,
+      customer: baseCustomer,
+      existingAttempts: [],
+      transactionAmount: new Prisma.Decimal(2000),
+      now: fixedNow,
+    });
+    expect(nachResult.action).toBe("RETRY_SCHEDULED");
+    expect(nachResult.scheduledFor?.toISOString()).toBe(
+      new Date(fixedNow.getTime() + 12 * 60 * 60 * 1000).toISOString()
+    );
+    expect(nachResult.reason).toContain("NACH: +12 hours");
+
+    // EMANDATE: slower recovery rail (+12 hours)
+    const emandateResult = decide({
+      paymentMode: PaymentMode.EMANDATE,
+      bucket: "BANK_ERROR",
+      confidence: 0.85,
+      customer: baseCustomer,
+      existingAttempts: [],
+      transactionAmount: new Prisma.Decimal(2000),
+      now: fixedNow,
+    });
+    expect(emandateResult.action).toBe("RETRY_SCHEDULED");
+    expect(emandateResult.scheduledFor?.toISOString()).toBe(
+      new Date(fixedNow.getTime() + 12 * 60 * 60 * 1000).toISOString()
+    );
+    expect(emandateResult.reason).toContain("EMANDATE: +12 hours");
   });
 });
