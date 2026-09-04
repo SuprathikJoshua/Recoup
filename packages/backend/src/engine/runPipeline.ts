@@ -26,12 +26,22 @@ async function processTransaction(
 
   const existingAttempts = attemptsByTxn.get(txn.txnId) || [];
 
-  // 2. Classify Root Cause
-  const classification = classify({ failCode: txn.failCode });
+  // 2. Classify Root Cause with Multi-Factor Scoring
+  const daysToMandateExpiry = Math.floor(
+    (new Date(customer.mandateExpiryDate).getTime() - new Date(txn.failTimestamp).getTime()) /
+      (1000 * 60 * 60 * 24)
+  );
+
+  const classification = classify({
+    failCode: txn.failCode,
+    daysToMandateExpiry,
+    pastSuccessTxnCount: customer.pastSuccessTxnDates.length,
+  });
+
   await logAudit(
     txn.txnId,
     "CLASSIFY",
-    `Classified '${txn.failCode}' into '${classification.bucket}' (confidence: ${classification.confidence})`,
+    `Classified '${txn.failCode}' into '${classification.bucket}' (confidence: ${classification.confidence}${classification.adjustmentReason ? `, adjusted: ${classification.adjustmentReason}` : ""})`,
     classification.confidence
   );
 
