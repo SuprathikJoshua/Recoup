@@ -1,5 +1,6 @@
 import { prisma } from "../config/db.js";
 import { classify, type ClassifyResult } from "../classifier/classify.js";
+import { corroborate } from "../classifier/corroborate.js";
 import { decide, type DeciderResult } from "../decider/decide.js";
 import { logAudit } from "../audit/auditLogger.js";
 import { executeDecision, type ExecutionResult } from "../executor/retryExecutor.js";
@@ -95,11 +96,28 @@ export async function processTransaction(
     classification.confidence
   );
 
+  // 3b. Second reasoning pass: Corroborate classification against customer payment history
+  const corroborated = corroborate(
+    classification,
+    customer,
+    existingAttempts,
+    txn
+  );
+
+  if (corroborated.confidence !== classification.confidence) {
+    await logAudit(
+      txn.txnId,
+      "CORROBORATE",
+      `Corroborated classification against customer history: confidence adjusted from ${classification.confidence} to ${corroborated.confidence} (${corroborated.adjustmentReason || "Payment history cross-check"})`,
+      corroborated.confidence
+    );
+  }
+
   // 4. Make Decision
   const decision = decide({
     paymentMode: txn.paymentMode,
-    bucket: classification.bucket,
-    confidence: classification.confidence,
+    bucket: corroborated.bucket,
+    confidence: corroborated.confidence,
     customer,
     existingAttempts,
     transactionAmount: txn.amount,
@@ -109,7 +127,7 @@ export async function processTransaction(
     txn.txnId,
     "ACTION_DECIDE",
     `Decision: ${decision.action}. ${decision.reason}`,
-    classification.confidence
+    corroborated.confidence
   );
 
   // 5. Synchronous in-memory mutation: immediately update contactCountThisWeek
@@ -127,7 +145,7 @@ export async function processTransaction(
     decision,
     existingAttempts.length,
     txn.customerId,
-    classification.bucket
+    corroborated.bucket
   );
 
   if (executionResult.retryAttempt) {
@@ -150,7 +168,7 @@ export async function processTransaction(
   return {
     transaction: updatedTxn,
     customer,
-    classification,
+    classification: corroborated,
     decision,
     executionResult,
     auditLogs,
