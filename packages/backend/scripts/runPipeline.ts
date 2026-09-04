@@ -58,7 +58,13 @@ async function processTransaction(
   }
 
   // 5. Execute Decision & Record Outcome
-  const result = await executeDecision(txn.txnId, decision, existingAttempts.length, txn.customerId);
+  const result = await executeDecision(
+    txn.txnId,
+    decision,
+    existingAttempts.length,
+    txn.customerId,
+    classification.bucket
+  );
 
   if (result.retryAttempt) {
     existingAttempts.push(result.retryAttempt);
