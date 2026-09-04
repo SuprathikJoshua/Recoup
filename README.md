@@ -23,6 +23,11 @@ To ensure financial compliance, AI is **strictly barred** from making retry deci
 
 ## Local Setup
 1. Clone the repository and run `npm install`.
-2. Configure `.env` with `DATABASE_URL` and `RAZORPAY_TEST_KEY_ID`.
+2. Configure `.env` with required environment variables:
+   - `DATABASE_URL` — Supabase dashboard (pooled connection string)
+   - `DIRECT_URL` — Supabase dashboard (direct connection string)
+   - `RAZORPAY_TEST_KEY_ID` — Razorpay Test Mode dashboard
+   - `RAZORPAY_TEST_KEY_SECRET` — Razorpay Test Mode dashboard
+   - `ANTHROPIC_API_KEY` — Anthropic console
 3. Run `npm run seed` to populate dummy transactions.
 4. Run `npm run dev` in both `packages/backend` and `packages/frontend`.

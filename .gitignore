@@ -22,7 +22,6 @@ out/
 .gemini
 .gsd
 /adapters
-/docs
 /scripts
 PROJECT_RULES.md
 GSD-STYLE.md
