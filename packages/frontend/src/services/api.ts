@@ -3,6 +3,7 @@ import type {
   PaginatedTransactions,
   FailedTransactionDetail,
   CaseExplanationResponse,
+  LiveDemoInjectionResponse,
 } from "../types/index.js";
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
@@ -10,6 +11,20 @@ export const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:30
 export async function fetchJson<T>(endpoint: string): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
   const response = await fetch(url);
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`API Error [${response.status}]: ${errorBody || response.statusText}`);
+  }
+  return response.json();
+}
+
+export async function postJson<T>(endpoint: string, body?: unknown): Promise<T> {
+  const url = `${API_BASE_URL}${endpoint}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
   if (!response.ok) {
     const errorBody = await response.text();
     throw new Error(`API Error [${response.status}]: ${errorBody || response.statusText}`);
@@ -51,4 +66,8 @@ export async function fetchTransactionDetail(txnId: string): Promise<FailedTrans
 
 export async function fetchCaseExplanation(txnId: string): Promise<CaseExplanationResponse> {
   return fetchJson<CaseExplanationResponse>(`/api/transactions/${encodeURIComponent(txnId)}/explain`);
+}
+
+export async function injectLiveFailure(failCode?: string): Promise<LiveDemoInjectionResponse> {
+  return postJson<LiveDemoInjectionResponse>("/api/demo/inject-failure", failCode ? { failCode } : {});
 }

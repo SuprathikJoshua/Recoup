@@ -2,7 +2,12 @@ import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "../config/db.js";
 import { getEngineSummary } from "./summaryService.js";
-import type { TxnStatus } from "../generated/prisma/client.js";
+import { processTransaction } from "../engine/processTransaction.js";
+import {
+  TxnStatus,
+  PaymentMode,
+  Prisma,
+} from "../generated/prisma/client.js";
 
 interface TransactionsQuery {
   status?: TxnStatus;
@@ -300,6 +305,119 @@ ${retrySummary || "No retry attempts executed."}`;
       fastify.log.error(error);
       return reply.status(500).send({
         error: "Failed to generate case explanation",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  /**
+   * POST /api/demo/inject-failure
+   * Injects a single live failed transaction into the database and processes it through the pipeline in real time.
+   */
+  fastify.post<{ Body?: { failCode?: string } }>("/api/demo/inject-failure", async (request, reply) => {
+    try {
+      const requestedCode = request.body?.failCode?.trim().toUpperCase();
+
+      const KNOWN_DEMO_CODES = ["01", "MD", "BE", "FD", "WA"];
+      const UNKNOWN_DEMO_CODES = [
+        "ZZ",
+        "99X",
+        "ERR_UNKNOWN",
+        "U99",
+        "INVALID_RESP",
+        "E_CORRUPT_PKT",
+      ];
+
+      const CODE_REASON_MAP: Record<string, { trueReason: string; isRecoverable: boolean | null }> = {
+        "01": { trueReason: "INSUFFICIENT_FUND", isRecoverable: true },
+        MD: { trueReason: "MANDATE_EXPIRED", isRecoverable: false },
+        BE: { trueReason: "BANK_ERROR", isRecoverable: true },
+        FD: { trueReason: "FRAUD_BLOCK", isRecoverable: false },
+        WA: { trueReason: "WRONG_ACCOUNT", isRecoverable: false },
+      };
+
+      const DEMO_MERCHANTS = [
+        "MERCH_STREAM_PLUS",
+        "MERCH_FITNESS_CLUB",
+        "MERCH_INSURANCE_LTD",
+        "MERCH_BROADBAND_FIBER",
+        "MERCH_EDTECH_LEARN",
+        "MERCH_FINTECH_CREDIT",
+        "MERCH_POWER_UTILITY",
+        "MERCH_SAAS_CLOUD",
+      ];
+
+      const DEMO_PAYMENT_MODES: PaymentMode[] = [
+        PaymentMode.UPI_AUTOPAY,
+        PaymentMode.NACH,
+        PaymentMode.EMANDATE,
+      ];
+
+      let failCode: string;
+      if (requestedCode && requestedCode.length > 0) {
+        failCode = requestedCode;
+      } else {
+        // ~30% chance of an unknown / garbage code to deliberately demo escalation guard-rail
+        const isUnknown = Math.random() < 0.30;
+        if (isUnknown) {
+          failCode = UNKNOWN_DEMO_CODES[Math.floor(Math.random() * UNKNOWN_DEMO_CODES.length)]!;
+        } else {
+          failCode = KNOWN_DEMO_CODES[Math.floor(Math.random() * KNOWN_DEMO_CODES.length)]!;
+        }
+      }
+
+      // Query random existing customer
+      const existingCustomers = await prisma.customerContext.findMany({
+        select: { customerId: true },
+        take: 50,
+      });
+
+      const customerId =
+        existingCustomers.length > 0
+          ? existingCustomers[Math.floor(Math.random() * existingCustomers.length)]!.customerId
+          : "CUST_0001";
+
+      const merchantId = DEMO_MERCHANTS[Math.floor(Math.random() * DEMO_MERCHANTS.length)]!;
+      const paymentMode = DEMO_PAYMENT_MODES[Math.floor(Math.random() * DEMO_PAYMENT_MODES.length)]!;
+
+      // Realistic random transaction amount (₹500 to ₹5,000)
+      const randomAmountNum = Math.floor(Math.random() * 450000 + 50000) / 100;
+      const amount = new Prisma.Decimal(randomAmountNum.toFixed(2));
+
+      const reasonMeta = CODE_REASON_MAP[failCode] || {
+        trueReason: "UNKNOWN",
+        isRecoverable: null,
+      };
+
+      const txnId = `TXN_LIVE_${Date.now().toString(36).toUpperCase()}_${Math.floor(1000 + Math.random() * 9000)}`;
+
+      // 1. Create fresh FailedTransaction record
+      const newTxn = await prisma.failedTransaction.create({
+        data: {
+          txnId,
+          customerId,
+          merchantId,
+          paymentMode,
+          amount,
+          failTimestamp: new Date(),
+          failCode,
+          trueReason: reasonMeta.trueReason,
+          isRecoverable: reasonMeta.isRecoverable,
+          status: TxnStatus.PENDING,
+        },
+      });
+
+      // 2. Immediately execute through shared pipeline
+      const pipelineResult = await processTransaction(newTxn);
+
+      return reply.status(201).send({
+        success: true,
+        result: pipelineResult,
+      });
+    } catch (error) {
+      fastify.log.error(error);
+      return reply.status(500).send({
+        error: "Failed to inject live demo transaction",
         message: error instanceof Error ? error.message : "Unknown error",
       });
     }

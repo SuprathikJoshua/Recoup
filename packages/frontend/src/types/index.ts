@@ -112,3 +112,30 @@ export interface CaseExplanationResponse {
   explanation: string;
   source?: string;
 }
+
+export interface LiveDemoResult {
+  transaction: FailedTransaction;
+  customer: CustomerContext;
+  classification: {
+    bucket: string;
+    confidence: number;
+    adjustmentReason?: string;
+  };
+  decision: {
+    action: string;
+    scheduledFor?: string;
+    reason: string;
+  };
+  executionResult: {
+    txnId: string;
+    actionTaken: string;
+    status: TxnStatus;
+    retryAttempt?: RetryAttempt;
+  };
+  auditLogs: AuditLog[];
+}
+
+export interface LiveDemoInjectionResponse {
+  success: boolean;
+  result: LiveDemoResult;
+}

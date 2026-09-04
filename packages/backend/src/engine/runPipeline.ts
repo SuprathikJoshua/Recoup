@@ -1,86 +1,7 @@
 import { prisma, pool } from "../config/db.js";
 import { loadTransactions } from "../intake/loadTransactions.js";
-import { classify } from "../classifier/classify.js";
-import { decide } from "../decider/decide.js";
-import { logAudit } from "../audit/auditLogger.js";
-import { executeDecision } from "../executor/retryExecutor.js";
-import type { CustomerContext, RetryAttempt, FailedTransaction } from "../generated/prisma/client.js";
-
-async function processTransaction(
-  txn: FailedTransaction,
-  customerMap: Map<string, CustomerContext>,
-  attemptsByTxn: Map<string, RetryAttempt[]>
-): Promise<void> {
-  // 1. Resolve Customer Context
-  let customer = customerMap.get(txn.customerId);
-  if (!customer) {
-    customer = {
-      customerId: txn.customerId,
-      debitPatternDays: [1, 2, 3],
-      pastSuccessTxnDates: [],
-      contactCountThisWeek: 0,
-      mandateExpiryDate: new Date("2028-01-01"),
-    };
-    customerMap.set(txn.customerId, customer);
-  }
-
-  const existingAttempts = attemptsByTxn.get(txn.txnId) || [];
-
-  // 2. Classify Root Cause with Multi-Factor Scoring
-  const daysToMandateExpiry = Math.floor(
-    (new Date(customer.mandateExpiryDate).getTime() - new Date(txn.failTimestamp).getTime()) /
-      (1000 * 60 * 60 * 24)
-  );
-
-  const classification = classify({
-    failCode: txn.failCode,
-    daysToMandateExpiry,
-    pastSuccessTxnCount: customer.pastSuccessTxnDates.length,
-  });
-
-  await logAudit(
-    txn.txnId,
-    "CLASSIFY",
-    `Classified '${txn.failCode}' into '${classification.bucket}' (confidence: ${classification.confidence}${classification.adjustmentReason ? `, adjusted: ${classification.adjustmentReason}` : ""})`,
-    classification.confidence
-  );
-
-  // 3. Make Decision
-  const decision = decide({
-    bucket: classification.bucket,
-    confidence: classification.confidence,
-    customer,
-    existingAttempts,
-    transactionAmount: txn.amount,
-  });
-  await logAudit(
-    txn.txnId,
-    "ACTION_DECIDE",
-    `Decision: ${decision.action}. ${decision.reason}`,
-    classification.confidence
-  );
-
-  // 4. Synchronous in-memory mutation: immediately update contactCountThisWeek
-  // before scheduling retry so subsequent transactions for the same customer see the live count
-  if (decision.action === "RETRY_SCHEDULED") {
-    customer.contactCountThisWeek += 1;
-    customerMap.set(txn.customerId, customer);
-  }
-
-  // 5. Execute Decision & Record Outcome
-  const result = await executeDecision(
-    txn.txnId,
-    decision,
-    existingAttempts.length,
-    txn.customerId,
-    classification.bucket
-  );
-
-  if (result.retryAttempt) {
-    existingAttempts.push(result.retryAttempt);
-    attemptsByTxn.set(txn.txnId, existingAttempts);
-  }
-}
+import { processTransaction } from "./processTransaction.js";
+import type { CustomerContext, RetryAttempt } from "../generated/prisma/client.js";
 
 export async function runPipeline(): Promise<void> {
   console.log("==================================================");
@@ -113,7 +34,7 @@ export async function runPipeline(): Promise<void> {
 
   console.log("\n[3/3] Processing pipeline sequentially for all transactions...");
   for (const txn of pendingTransactions) {
-    await processTransaction(txn, customerMap, attemptsByTxn);
+    await processTransaction(txn, { customerMap, attemptsByTxn });
   }
   console.log(`  ✓ Successfully processed all ${pendingTransactions.length} transactions.\n`);
 

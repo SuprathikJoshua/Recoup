@@ -14,8 +14,8 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
-import { fetchSummary } from "../services/api.js";
-import type { EngineSummaryReport } from "../types/index.js";
+import { fetchSummary, injectLiveFailure } from "../services/api.js";
+import type { EngineSummaryReport, LiveDemoResult } from "../types/index.js";
 import {
   ShieldCheckIcon,
   ActivityIcon,
@@ -23,6 +23,8 @@ import {
   AlertTriangleIcon,
   ArrowRightIcon,
   CheckCircleIcon,
+  BoltIcon,
+  CloseIcon,
 } from "../components/Icons.js";
 
 interface OverviewProps {
@@ -136,6 +138,38 @@ export function Overview({
   const [summary, setSummary] = useState<EngineSummaryReport | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Live Demo Injection state
+  const [showDemoModal, setShowDemoModal] = useState<boolean>(false);
+  const [demoFailCode, setDemoFailCode] = useState<string>("");
+  const [injecting, setInjecting] = useState<boolean>(false);
+  const [demoResult, setDemoResult] = useState<LiveDemoResult | null>(null);
+  const [demoError, setDemoError] = useState<string | null>(null);
+  const [activeStep, setActiveStep] = useState<number>(0);
+
+  const handleInject = async () => {
+    try {
+      setInjecting(true);
+      setDemoError(null);
+      setDemoResult(null);
+      setActiveStep(1);
+
+      const response = await injectLiveFailure(demoFailCode || undefined);
+
+      setTimeout(() => setActiveStep(2), 250);
+      setTimeout(() => setActiveStep(3), 500);
+      setTimeout(() => {
+        setActiveStep(4);
+        setDemoResult(response.result);
+        setInjecting(false);
+        loadData();
+      }, 750);
+    } catch (err) {
+      setDemoError(err instanceof Error ? err.message : "Failed to inject live demo failure");
+      setInjecting(false);
+      setActiveStep(0);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -302,6 +336,13 @@ export function Overview({
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowDemoModal(true)}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white text-xs font-bold shadow-lg shadow-orange-500/25 transition cursor-pointer"
+          >
+            <BoltIcon className="w-3.5 h-3.5 text-amber-100" />
+            Inject Live Failure
+          </button>
           <button
             onClick={loadData}
             disabled={loading}
@@ -849,6 +890,426 @@ export function Overview({
           </div>
         )}
       </div>
+
+      {/* Live Demo Injection Modal */}
+      {showDemoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden my-8 max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-slate-800 bg-slate-950/50">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-gradient-to-br from-amber-500 to-rose-600 text-white shadow-lg shadow-amber-500/20">
+                  <BoltIcon className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-bold text-white">
+                      Live Failure Injection Simulator
+                    </h2>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-emerald-950 text-emerald-400 border border-emerald-800/60 font-semibold">
+                      Real-Time Engine
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Inject a single failed transaction into the autonomous recovery pipeline to observe real-time classification, policy routing, and settlement simulation.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => !injecting && setShowDemoModal(false)}
+                disabled={injecting}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer disabled:opacity-50"
+                aria-label="Close Modal"
+              >
+                <CloseIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body (Scrollable) */}
+            <div className="p-6 space-y-6 overflow-y-auto flex-1">
+              {/* Controls */}
+              <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/70 space-y-3">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Select Failure Scenario / Code:
+                </label>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <select
+                    value={demoFailCode}
+                    onChange={(e) => setDemoFailCode(e.target.value)}
+                    disabled={injecting}
+                    className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                  >
+                    <option value="">Random (~70% Known Codes, ~30% Unknown Escalation)</option>
+                    <option value="01">01 - Insufficient Funds (Auto salary-cycle retry)</option>
+                    <option value="MD">MD - Mandate Expired (Re-mandate customer nudge)</option>
+                    <option value="BE">BE - Bank Error (Off-peak retry)</option>
+                    <option value="ZZ">ZZ - Unknown/Garbage Code (Ops Escalation Guard-rail Demo)</option>
+                    <option value="FD">FD - Account Closed / Fraud (Unrecoverable Dead)</option>
+                    <option value="WA">WA - Mandate Withdrawn (Unrecoverable Dead)</option>
+                  </select>
+
+                  <button
+                    onClick={handleInject}
+                    disabled={injecting}
+                    className="flex items-center justify-center gap-2 px-5 py-2 rounded-lg bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white text-xs font-bold shadow-lg shadow-orange-500/25 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+                  >
+                    <BoltIcon className={`w-4 h-4 ${injecting ? "animate-spin" : ""}`} />
+                    {injecting ? "Processing Pipeline..." : "Inject Live Failure"}
+                  </button>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[11px]">
+                  <span className="text-slate-400 text-xs mr-1">Presets:</span>
+                  <button
+                    type="button"
+                    onClick={() => setDemoFailCode("")}
+                    disabled={injecting}
+                    className={`px-2 py-1 rounded transition cursor-pointer font-medium ${demoFailCode === "" ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
+                  >
+                    🎲 70/30 Random
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDemoFailCode("01")}
+                    disabled={injecting}
+                    className={`px-2 py-1 rounded font-mono transition cursor-pointer ${demoFailCode === "01" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
+                  >
+                    01 (Funds)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDemoFailCode("MD")}
+                    disabled={injecting}
+                    className={`px-2 py-1 rounded font-mono transition cursor-pointer ${demoFailCode === "MD" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
+                  >
+                    MD (Expired)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDemoFailCode("BE")}
+                    disabled={injecting}
+                    className={`px-2 py-1 rounded font-mono transition cursor-pointer ${demoFailCode === "BE" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
+                  >
+                    BE (Bank Err)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDemoFailCode("ZZ")}
+                    disabled={injecting}
+                    className={`px-2 py-1 rounded font-mono transition cursor-pointer ${demoFailCode === "ZZ" ? "bg-rose-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
+                  >
+                    ZZ (Unknown Escalation)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDemoFailCode("FD")}
+                    disabled={injecting}
+                    className={`px-2 py-1 rounded font-mono transition cursor-pointer ${demoFailCode === "FD" ? "bg-rose-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
+                  >
+                    FD (Fraud Stop)
+                  </button>
+                </div>
+              </div>
+
+              {/* Error Message */}
+              {demoError && (
+                <div className="p-4 rounded-xl bg-rose-950/50 border border-rose-800/80 text-rose-200 text-xs flex items-center gap-3">
+                  <AlertTriangleIcon className="w-5 h-5 text-rose-400 flex-shrink-0" />
+                  <span>{demoError}</span>
+                </div>
+              )}
+
+              {/* Stepper Progress Indicator */}
+              {(injecting || demoResult || activeStep > 0) && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div
+                    className={`p-3 rounded-xl border transition-all text-center ${
+                      activeStep >= 1
+                        ? "bg-indigo-950/60 border-indigo-500/80 text-indigo-200"
+                        : "bg-slate-800/40 border-slate-800 text-slate-500"
+                    }`}
+                  >
+                    <div className="text-[10px] uppercase font-mono font-bold">Step 1</div>
+                    <div className="text-xs font-semibold mt-0.5">Webhook Ingest</div>
+                  </div>
+                  <div
+                    className={`p-3 rounded-xl border transition-all text-center ${
+                      activeStep >= 2
+                        ? "bg-indigo-950/60 border-indigo-500/80 text-indigo-200"
+                        : "bg-slate-800/40 border-slate-800 text-slate-500"
+                    }`}
+                  >
+                    <div className="text-[10px] uppercase font-mono font-bold">Step 2</div>
+                    <div className="text-xs font-semibold mt-0.5">Multi-Factor Classify</div>
+                  </div>
+                  <div
+                    className={`p-3 rounded-xl border transition-all text-center ${
+                      activeStep >= 3
+                        ? "bg-indigo-950/60 border-indigo-500/80 text-indigo-200"
+                        : "bg-slate-800/40 border-slate-800 text-slate-500"
+                    }`}
+                  >
+                    <div className="text-[10px] uppercase font-mono font-bold">Step 3</div>
+                    <div className="text-xs font-semibold mt-0.5">Policy & Guard-Rails</div>
+                  </div>
+                  <div
+                    className={`p-3 rounded-xl border transition-all text-center ${
+                      activeStep >= 4
+                        ? "bg-indigo-950/60 border-indigo-500/80 text-indigo-200"
+                        : "bg-slate-800/40 border-slate-800 text-slate-500"
+                    }`}
+                  >
+                    <div className="text-[10px] uppercase font-mono font-bold">Step 4</div>
+                    <div className="text-xs font-semibold mt-0.5">Execute & Audit</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Processing Spinner */}
+              {injecting && (
+                <div className="py-8 flex flex-col items-center justify-center text-slate-400 space-y-3">
+                  <div className="w-8 h-8 border-3 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+                  <p className="text-xs font-mono text-amber-300">
+                    Executing live pipeline through classifier and decision engine...
+                  </p>
+                </div>
+              )}
+
+              {/* Live Result Breakdown */}
+              {demoResult && (
+                <div className="space-y-4 animate-fadeIn">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Stage 1: Transaction Details */}
+                    <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/70 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                          1. Ingested Transaction
+                        </span>
+                        <span className="px-2 py-0.5 rounded font-mono text-[11px] bg-indigo-950 text-indigo-300 border border-indigo-800/50">
+                          {demoResult.transaction.txnId}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                        <div>
+                          <span className="text-slate-400 text-[11px] block">Customer:</span>
+                          <span className="font-mono text-slate-200">{demoResult.customer.customerId}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 text-[11px] block">Amount:</span>
+                          <span className="font-bold text-emerald-400">
+                            ₹{demoResult.transaction.amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 text-[11px] block">Failure Code:</span>
+                          <span className="font-mono px-1.5 py-0.5 rounded bg-rose-950/70 text-rose-300 border border-rose-800/50 text-[11px]">
+                            {demoResult.transaction.failCode}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 text-[11px] block">Customer Contacts:</span>
+                          <span className="font-mono text-slate-200">
+                            {demoResult.customer.contactCountThisWeek} this week
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Stage 2: Classification */}
+                    <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/70 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                          2. Multi-Factor Classifier
+                        </span>
+                        <span className="px-2 py-0.5 rounded font-mono text-[11px] font-bold bg-purple-950 text-purple-300 border border-purple-800/50">
+                          {(demoResult.classification.confidence * 100).toFixed(0)}% Confidence
+                        </span>
+                      </div>
+                      <div className="text-xs space-y-1.5 pt-1">
+                        <div>
+                          <span className="text-slate-400 text-[11px] block">Classification Bucket:</span>
+                          <span className="font-mono font-semibold text-white">
+                            {demoResult.classification.bucket}
+                          </span>
+                        </div>
+                        {demoResult.classification.adjustmentReason && (
+                          <div>
+                            <span className="text-slate-400 text-[11px] block">Multi-Factor Adjustment:</span>
+                            <span className="text-slate-300 text-[11px]">
+                              {demoResult.classification.adjustmentReason}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Stage 3: Decision Engine */}
+                    <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/70 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                          3. Policy & Guard-Rails
+                        </span>
+                        <span className={`px-2 py-0.5 rounded font-mono text-[11px] font-bold border ${
+                          demoResult.decision.action === "RETRY_SCHEDULED"
+                            ? "bg-emerald-950 text-emerald-300 border-emerald-800/50"
+                            : demoResult.decision.action === "CUSTOMER_NUDGE"
+                            ? "bg-amber-950 text-amber-300 border-amber-800/50"
+                            : demoResult.decision.action === "ESCALATED_HUMAN_REVIEW"
+                            ? "bg-violet-950 text-violet-300 border-violet-800/50"
+                            : "bg-rose-950 text-rose-300 border-rose-800/50"
+                        }`}>
+                          {demoResult.decision.action}
+                        </span>
+                      </div>
+                      <div className="text-xs space-y-1 pt-1">
+                        {demoResult.decision.scheduledFor && (
+                          <div>
+                            <span className="text-slate-400 text-[11px] block">Scheduled Retry:</span>
+                            <span className="font-mono text-slate-200">
+                              {new Date(demoResult.decision.scheduledFor).toLocaleString("en-IN")}
+                            </span>
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-slate-400 text-[11px] block">Decision Rule:</span>
+                          <span className="text-slate-300 text-[11px] leading-relaxed">
+                            {demoResult.decision.reason}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Stage 4: Execution & Settlement */}
+                    <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/70 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                          4. Execution & Settlement
+                        </span>
+                        <span className={`px-2 py-0.5 rounded font-mono text-[11px] font-bold border ${
+                          demoResult.executionResult.status === "RESOLVED_RECOVERED"
+                            ? "bg-emerald-950 text-emerald-300 border-emerald-800/50"
+                            : demoResult.executionResult.status === "PENDING"
+                            ? "bg-amber-950 text-amber-300 border-amber-800/50"
+                            : demoResult.executionResult.status === "ESCALATED"
+                            ? "bg-violet-950 text-violet-300 border-violet-800/50"
+                            : "bg-rose-950 text-rose-300 border-rose-800/50"
+                        }`}>
+                          {demoResult.executionResult.status}
+                        </span>
+                      </div>
+                      <div className="text-xs space-y-1 pt-1">
+                        <div>
+                          <span className="text-slate-400 text-[11px] block">Action Executed:</span>
+                          <span className="font-mono text-slate-200">{demoResult.executionResult.actionTaken}</span>
+                        </div>
+                        {demoResult.executionResult.retryAttempt && (
+                          <div className="space-y-1 pt-1.5 border-t border-slate-700/40 text-[11px]">
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Attempt:</span>
+                              <span className="font-mono text-slate-200 font-semibold">
+                                Attempt #{demoResult.executionResult.retryAttempt.attemptNo}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Settlement Result:</span>
+                              <span className={`font-mono font-bold ${
+                                demoResult.executionResult.retryAttempt.result === "SUCCESS"
+                                  ? "text-emerald-400"
+                                  : demoResult.executionResult.retryAttempt.result === "FAILED"
+                                  ? "text-rose-400"
+                                  : "text-amber-400"
+                              }`}>
+                                {demoResult.executionResult.retryAttempt.result}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Fee Charged:</span>
+                              <span className="font-mono text-slate-300">
+                                ₹{Number(demoResult.executionResult.retryAttempt.feeCharged).toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Audit Trail Log */}
+                  <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <ShieldCheckIcon className="w-4 h-4 text-indigo-400" />
+                        Audit Trail Generated ({demoResult.auditLogs.length} Events)
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400">Immutable Ledger</span>
+                    </div>
+
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                      {demoResult.auditLogs.map((log) => (
+                        <div
+                          key={log.id}
+                          className="p-2 rounded-lg bg-slate-900/90 border border-slate-800/80 flex items-start justify-between gap-3 text-[11px]"
+                        >
+                          <div className="space-y-0.5 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-slate-800 text-indigo-300 font-semibold border border-slate-700">
+                                {log.decisionType}
+                              </span>
+                              <span className="text-slate-400 font-mono text-[10px]">
+                                {new Date(log.timestamp).toLocaleTimeString("en-IN")}
+                              </span>
+                              {log.confidenceScore !== null && log.confidenceScore !== undefined && (
+                                <span className="text-[10px] font-mono text-slate-400">
+                                  {(Number(log.confidenceScore) * 100).toFixed(0)}% conf
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-slate-300">{log.reasonText}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-xs text-slate-400">
+                {demoResult ? (
+                  <span>
+                    Dashboard telemetry automatically synchronized with latest settlement.
+                  </span>
+                ) : (
+                  <span>Ready to inject failure webhook into recovery engine.</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                {demoResult && (
+                  <button
+                    onClick={() => {
+                      setShowDemoModal(false);
+                      onNavigateToDetail(demoResult.transaction.txnId);
+                    }}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 transition cursor-pointer"
+                  >
+                    Inspect Full Case Details →
+                  </button>
+                )}
+                <button
+                  onClick={() => !injecting && setShowDemoModal(false)}
+                  disabled={injecting}
+                  className="flex-1 sm:flex-none px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium transition cursor-pointer disabled:opacity-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
