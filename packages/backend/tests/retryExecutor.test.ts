@@ -275,42 +275,62 @@ describe("executeDecision - Interactive Prisma Transactions", () => {
     // Test MARKED_DEAD
     transactionSpy.mockClear();
     mockTx.failedTransaction.update.mockClear();
+    logAuditSpy.mockClear();
     await executeDecision("TXN_2", { action: "MARKED_DEAD", reason: "Max attempts reached" }, 3, "CUST_1");
     expect(transactionSpy).toHaveBeenCalled();
     expect(mockTx.failedTransaction.update).toHaveBeenCalledWith({
       where: { txnId: "TXN_2" },
       data: { status: TxnStatus.DEAD },
     });
+    expect(logAuditSpy).toHaveBeenCalledWith("TXN_2", "EXECUTE_MARKED_DEAD", expect.stringContaining("Max attempts reached"));
 
     // Test ESCALATED
     transactionSpy.mockClear();
     mockTx.failedTransaction.update.mockClear();
+    logAuditSpy.mockClear();
     await executeDecision("TXN_3", { action: "ESCALATED", reason: "Unknown failCode" }, 0, "CUST_1");
     expect(transactionSpy).toHaveBeenCalled();
     expect(mockTx.failedTransaction.update).toHaveBeenCalledWith({
       where: { txnId: "TXN_3" },
       data: { status: TxnStatus.ESCALATED },
     });
+    expect(logAuditSpy).toHaveBeenCalledWith("TXN_3", "EXECUTE_ESCALATED", expect.stringContaining("Unknown failCode"));
 
     // Test SKIPPED_TOO_SOON
     transactionSpy.mockClear();
     mockTx.failedTransaction.update.mockClear();
+    logAuditSpy.mockClear();
     await executeDecision("TXN_4", { action: "SKIPPED_TOO_SOON", reason: "Under min retry gap" }, 1, "CUST_1");
     expect(transactionSpy).toHaveBeenCalled();
     expect(mockTx.failedTransaction.update).toHaveBeenCalledWith({
       where: { txnId: "TXN_4" },
       data: { status: TxnStatus.PENDING },
     });
+    expect(logAuditSpy).toHaveBeenCalledWith("TXN_4", "EXECUTE_SKIPPED_TOO_SOON", expect.stringContaining("Under min retry gap"));
+
+    // Test SKIPPED_CONTACT_CAP
+    transactionSpy.mockClear();
+    mockTx.failedTransaction.update.mockClear();
+    logAuditSpy.mockClear();
+    await executeDecision("TXN_4B", { action: "SKIPPED_CONTACT_CAP", reason: "Weekly contact cap reached" }, 1, "CUST_1");
+    expect(transactionSpy).toHaveBeenCalled();
+    expect(mockTx.failedTransaction.update).toHaveBeenCalledWith({
+      where: { txnId: "TXN_4B" },
+      data: { status: TxnStatus.PENDING },
+    });
+    expect(logAuditSpy).toHaveBeenCalledWith("TXN_4B", "EXECUTE_SKIPPED_CONTACT_CAP", expect.stringContaining("Weekly contact cap reached"));
 
     // Test default / unknown action
     transactionSpy.mockClear();
     mockTx.failedTransaction.update.mockClear();
+    logAuditSpy.mockClear();
     await executeDecision("TXN_5", { action: "SOMETHING_WEIRD", reason: "Unhandled" }, 0, "CUST_1");
     expect(transactionSpy).toHaveBeenCalled();
     expect(mockTx.failedTransaction.update).toHaveBeenCalledWith({
       where: { txnId: "TXN_5" },
       data: { status: TxnStatus.ESCALATED },
     });
+    expect(logAuditSpy).toHaveBeenCalledWith("TXN_5", "EXECUTE_UNKNOWN", expect.stringContaining("Unhandled"));
   });
 });
 
